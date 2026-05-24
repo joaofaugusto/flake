@@ -156,18 +156,19 @@ fn launch_app(app: tauri::AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
-// Extracts icons for a list of paths in a single PowerShell call.
-// Returns a map of path -> base64-encoded PNG.
-#[tauri::command]
-async fn get_icons(paths: Vec<String>) -> HashMap<String, String> {
+// Calls PowerShell to extract icons for paths not yet cached.
+async fn extract_icons_via_ps(paths: Vec<String>) -> HashMap<String, String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
+
+    if paths.is_empty() {
+        return HashMap::new();
+    }
 
     let Ok(paths_json) = serde_json::to_string(&paths) else {
         return HashMap::new();
     };
 
-    // System.Drawing.Icon.ExtractAssociatedIcon follows .lnk files automatically.
     let script = r#"
 Add-Type -AssemblyName System.Drawing
 $paths = [Console]::In.ReadToEnd() | ConvertFrom-Json
@@ -197,16 +198,54 @@ $result | ConvertTo-Json -Compress
     let Ok(mut child) = cmd.spawn() else {
         return HashMap::new();
     };
-
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(paths_json.as_bytes());
     }
-
     let Ok(output) = child.wait_with_output() else {
         return HashMap::new();
     };
-
     serde_json::from_slice(&output.stdout).unwrap_or_default()
+}
+
+// Returns icons from disk cache when available; only calls PowerShell for missing ones.
+#[tauri::command]
+async fn get_icons(app: tauri::AppHandle, paths: Vec<String>) -> HashMap<String, String> {
+    let cache_path = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join("icons_cache.json"));
+
+    let mut cache: HashMap<String, String> = cache_path
+        .as_ref()
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default();
+
+    let missing: Vec<String> = paths
+        .iter()
+        .filter(|p| !cache.contains_key(*p))
+        .cloned()
+        .collect();
+
+    if !missing.is_empty() {
+        let fresh = extract_icons_via_ps(missing).await;
+        cache.extend(fresh);
+
+        if let Some(ref path) = cache_path {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(json) = serde_json::to_string(&cache) {
+                let _ = std::fs::write(path, json);
+            }
+        }
+    }
+
+    paths
+        .into_iter()
+        .filter_map(|p| cache.remove(&p).map(|v| (p, v)))
+        .collect()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
