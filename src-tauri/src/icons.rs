@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use tauri::Manager;
 use std::io::Write;
 use std::process::{Command, Stdio};
+use tauri::Manager;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -56,9 +56,10 @@ async fn extract_icons_via_ps(paths: Vec<String>) -> HashMap<String, String> {
         return HashMap::new();
     };
 
-    // Handles two path types:
+    // Handles multiple path types from shell:AppsFolder:
     //   Win32  — absolute .exe/.lnk  → ExtractAssociatedIcon
     //   MSIX   — AUMID (contains '!') → AppxManifest logo PNG
+    //   Other  — application refs, UNC, etc. → resolved via .lnk tracking or image fallback
     let script = r#"
 Add-Type -AssemblyName System.Drawing
 $paths  = [Console]::In.ReadToEnd() | ConvertFrom-Json
@@ -68,6 +69,7 @@ $result = @{}
 foreach ($path in $paths) {
     try {
         if ($path.Contains('!')) {
+            # --- MSIX / UWP branch (AUMID contains '!') ---
             $family = $path.Split('!')[0]
             $pkg    = $allPkg | Where-Object { $_.PackageFamilyName -eq $family } | Select-Object -First 1
             if ($null -eq $pkg) { continue }
@@ -104,8 +106,40 @@ foreach ($path in $paths) {
             $result[$path] = [Convert]::ToBase64String($ms.ToArray())
             $ms.Dispose(); $bmp.Dispose(); $img.Dispose()
         } else {
-            $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($path)
-            if ($null -ne $icon) {
+            # --- Win32 / non-MSIX branch ---
+            $resolvedPath = $path
+            $icon = $null
+
+            # Attempt 1: Direct ExtractAssociatedIcon on the original path
+            try { $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($resolvedPath) } catch {}
+
+            # Attempt 2: If path is a .lnk and icon extraction failed, resolve the shortcut target
+            if ($null -eq $icon -and $resolvedPath -like '*.lnk') {
+                try {
+                    $wsh = New-Object -ComObject WScript.Shell
+                    $sc  = $wsh.CreateShortcut($resolvedPath)
+                    $target = $sc.TargetPath
+                    if (-not [string]::IsNullOrWhiteSpace($target) -and (Test-Path $target)) {
+                        $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($target)
+                        if ($null -ne $icon) { $resolvedPath = $target }
+                    }
+                } catch {}
+            }
+
+            # Attempt 3: Final fallback — try loading the resolved path as an image directly
+            if ($null -eq $icon) {
+                try {
+                    if (Test-Path $resolvedPath) {
+                        $img = [System.Drawing.Image]::FromFile($resolvedPath)
+                        $bmp = New-Object System.Drawing.Bitmap($img, 32, 32)
+                        $ms  = New-Object System.IO.MemoryStream
+                        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+                        $result[$path] = [Convert]::ToBase64String($ms.ToArray())
+                        $ms.Dispose(); $bmp.Dispose(); $img.Dispose()
+                    }
+                } catch {}
+            } else {
+                # Icon was extracted via Attempt 1 or 2 — convert to PNG
                 $bmp = New-Object System.Drawing.Bitmap($icon.ToBitmap(), 32, 32)
                 $ms  = New-Object System.IO.MemoryStream
                 $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -113,7 +147,9 @@ foreach ($path in $paths) {
                 $ms.Dispose(); $bmp.Dispose(); $icon.Dispose()
             }
         }
-    } catch {}
+    } catch {
+        # Individual path failure — skip silently, other paths unaffected
+    }
 }
 $result | ConvertTo-Json -Compress
 "#;

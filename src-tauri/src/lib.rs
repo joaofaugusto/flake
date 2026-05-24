@@ -33,6 +33,19 @@ pub fn run() {
                 let _ = apply_blur(&win, Some((18, 18, 18, 125)));
             }
 
+            // ── Click outside = hide (Spotlight behavior) ──────────
+            #[cfg(desktop)]
+            if let Some(win) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(false) = event {
+                        if let Some(win) = app_handle.get_webview_window("main") {
+                            let _ = win.hide();
+                        }
+                    }
+                });
+            }
+
             // ── Tray icon ───────────────────────────────────────────
             let show = MenuItem::with_id(app, "show", "Mostrar Flake", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
@@ -73,6 +86,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             apps::get_apps,
+            apps::track_launch,
             icons::get_icons,
             launch::launch_app,
         ])

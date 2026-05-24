@@ -50,13 +50,15 @@ function App() {
     });
   }, []);
 
-  const results = query.trim()
-    ? apps.filter(
-        (app) =>
-          app.name.toLowerCase().includes(query.toLowerCase()) ||
-          app.category.toLowerCase().includes(query.toLowerCase()),
-      )
-    : apps.slice(0, 7);
+  // Only show results when the user has typed something
+  const results =
+    query.trim().length > 0
+      ? apps.filter(
+          (app) =>
+            app.name.toLowerCase().includes(query.toLowerCase()) ||
+            app.category.toLowerCase().includes(query.toLowerCase()),
+        )
+      : [];
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -70,6 +72,8 @@ function App() {
   }, [selectedIndex]);
 
   const handleSelect = async (app: InstalledApp) => {
+    // Track the launch for future ranking
+    invoke("track_launch", { path: app.path });
     await invoke("launch_app", { path: app.path });
   };
 
@@ -119,7 +123,7 @@ function App() {
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Spotlight Search"
+          placeholder="Flake Search"
           spellCheck={false}
         />
       </div>
@@ -129,13 +133,13 @@ function App() {
       <div className="results" ref={listRef}>
         {loading && <div className="empty-state">Searching Mac...</div>}
 
-        {!loading && results.length === 0 && (
-          <div className="empty-state">No results found.</div>
+        {!loading && query.trim().length > 0 && results.length === 0 && (
+          <div className="empty-state">No results found for "{query}"</div>
         )}
 
         {!loading && results.length > 0 && (
           <>
-            {!query && <div className="section-label">Suggested</div>}
+            <div className="section-label">Applications</div>
             {results.map((app, i) => (
               <div
                 key={app.path}
