@@ -26,7 +26,9 @@ function AppIcon({ name, src }: { name: string; src?: string }) {
     .map((w) => w[0] ?? "")
     .join("")
     .toUpperCase();
-  return <span className="result-icon result-icon--letter">{letters || "?"}</span>;
+  return (
+    <span className="result-icon result-icon--letter">{letters || "?"}</span>
+  );
 }
 
 function App() {
@@ -52,7 +54,7 @@ function App() {
     ? apps.filter(
         (app) =>
           app.name.toLowerCase().includes(query.toLowerCase()) ||
-          app.category.toLowerCase().includes(query.toLowerCase())
+          app.category.toLowerCase().includes(query.toLowerCase()),
       )
     : apps.slice(0, 7);
 
@@ -62,7 +64,7 @@ function App() {
 
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>(
-      `[data-index="${selectedIndex}"]`
+      `[data-index="${selectedIndex}"]`,
     );
     el?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
@@ -100,16 +102,16 @@ function App() {
           xmlns="http://www.w3.org/2000/svg"
         >
           <circle
-            cx="8.5"
-            cy="8.5"
-            r="5.5"
+            cx="9.5"
+            cy="9.5"
+            r="6"
             stroke="currentColor"
-            strokeWidth="1.6"
+            strokeWidth="1.8"
           />
           <path
-            d="M13 13l3.5 3.5"
+            d="M14 14l4 4"
             stroke="currentColor"
-            strokeWidth="1.6"
+            strokeWidth="1.8"
             strokeLinecap="round"
           />
         </svg>
@@ -117,7 +119,7 @@ function App() {
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search apps…"
+          placeholder="Spotlight Search"
           spellCheck={false}
         />
       </div>
@@ -125,10 +127,10 @@ function App() {
       <div className="divider" />
 
       <div className="results" ref={listRef}>
-        {loading && <div className="empty-state">Loading…</div>}
+        {loading && <div className="empty-state">Searching Mac...</div>}
 
         {!loading && results.length === 0 && (
-          <div className="empty-state">No results for "{query}"</div>
+          <div className="empty-state">No results found.</div>
         )}
 
         {!loading && results.length > 0 && (
@@ -150,7 +152,7 @@ function App() {
                   )}
                 </div>
                 {i === selectedIndex && (
-                  <span className="result-enter-hint">↵</span>
+                  <span className="shortcut-badge">return</span>
                 )}
               </div>
             ))}
