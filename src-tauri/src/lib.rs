@@ -48,9 +48,12 @@ fn get_apps() -> Vec<InstalledApp> {
 
     // %LOCALAPPDATA%\Programs — Electron and per-user installers (Squirrel, etc.)
     if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
-        let base = PathBuf::from(&localappdata).join("Programs");
-        scan_lnk_dir(&base, &base, &mut apps);
-        scan_exe_in_named_dirs(&base, &mut apps);
+        let programs = PathBuf::from(&localappdata).join("Programs");
+        scan_lnk_dir(&programs, &programs, &mut apps);
+        scan_exe_in_named_dirs(&programs, &mut apps);
+
+        // %LOCALAPPDATA% root — catches Claude, Discord, WhatsApp, etc.
+        scan_localappdata_apps(PathBuf::from(localappdata), &mut apps);
     }
 
     apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -129,6 +132,86 @@ fn scan_exe_in_named_dirs(programs_dir: &Path, apps: &mut Vec<InstalledApp>) {
             }
         }
     }
+}
+
+// Scans %LOCALAPPDATA% for Squirrel-style Electron apps.
+// Handles two patterns:
+//   A) <AppDir>/<App>.exe                          (e.g. AnthropicClaude/Claude.exe)
+//   B) <AppDir>/app-x.y.z/<App>.exe               (e.g. Discord/app-1.0.9/Discord.exe)
+fn scan_localappdata_apps(base: PathBuf, apps: &mut Vec<InstalledApp>) {
+    const SKIP: &[&str] = &[
+        "microsoft", "packages", "temp", "google", "squirreltemp",
+        "d3dscache", "nuget", "npm", "pip", "comms", "dbg",
+        "connecteddevicesplatform", "diagnostics", "publishers", "programs",
+    ];
+
+    let Ok(entries) = std::fs::read_dir(&base) else { return };
+
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() { continue; }
+
+        let dir_lower = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+
+        if SKIP.iter().any(|s| dir_lower.starts_with(s)) { continue; }
+
+        // Pattern A: direct exe in top-level dir
+        if let Some(app) = find_main_exe(&dir) {
+            if is_user_app(&app.name) {
+                apps.push(app);
+                continue;
+            }
+        }
+
+        // Pattern B: versioned subdir (app-x.y.z)
+        let Ok(subdirs) = std::fs::read_dir(&dir) else { continue };
+        for sub in subdirs.flatten() {
+            let subdir = sub.path();
+            if !subdir.is_dir() { continue; }
+            let subname = subdir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !subname.starts_with("app-") { continue; }
+
+            if let Some(app) = find_main_exe(&subdir) {
+                if is_user_app(&app.name) {
+                    apps.push(app);
+                }
+                break; // first version dir is enough
+            }
+        }
+    }
+}
+
+fn find_main_exe(dir: &Path) -> Option<InstalledApp> {
+    const SKIP_EXE: &[&str] = &[
+        "update", "unins", "helper", "crashpad", "setup", "squirrel", "elevate",
+    ];
+
+    let Ok(entries) = std::fs::read_dir(dir) else { return None };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.extension().map_or(false, |e| e.eq_ignore_ascii_case("exe")) { continue; }
+
+        let name = path
+            .file_stem()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        if SKIP_EXE.iter().any(|s| name.to_lowercase().contains(s)) { continue; }
+
+        return Some(InstalledApp {
+            name,
+            path: path.to_string_lossy().to_string(),
+            category: String::new(),
+        });
+    }
+    None
 }
 
 fn is_user_app(name: &str) -> bool {
