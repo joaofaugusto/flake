@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import "./App.css";
 
 interface InstalledApp {
@@ -60,13 +60,22 @@ function App() {
       )
     : [];
 
-  // Dynamically resize the window to match content height
+  // Dynamically resize the window using PhysicalSize to avoid DPI black blocks
   useEffect(() => {
-    const launcher = document.querySelector<HTMLElement>(".launcher");
-    if (launcher) {
-      const height = launcher.clientHeight;
-      getCurrentWindow().setSize(new LogicalSize(680, height));
-    }
+    const resizeWindow = async () => {
+      const launcherEl = document.querySelector<HTMLElement>(".launcher");
+      if (launcherEl) {
+        const cssWidth = 680;
+        const cssHeight = launcherEl.clientHeight || 52;
+        const dpr = window.devicePixelRatio || 1;
+        const physicalWidth = Math.round(cssWidth * dpr);
+        const physicalHeight = Math.round(cssHeight * dpr);
+        await getCurrentWindow().setSize(
+          new PhysicalSize(physicalWidth, physicalHeight),
+        );
+      }
+    };
+    resizeWindow();
   }, [results, query, loading]);
 
   useEffect(() => {

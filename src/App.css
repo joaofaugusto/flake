@@ -45,13 +45,17 @@
 }
 
 html,
-body,
-#root {
+body {
     width: 100%;
-    height: max-content;
-    min-height: 100%;
-    background: transparent;
+    height: 100%;
+    background: transparent !important;
     overflow: hidden;
+}
+
+#root {
+    width: max-content;
+    height: max-content;
+    background: transparent !important;
 }
 
 body {
