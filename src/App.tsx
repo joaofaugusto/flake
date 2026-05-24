@@ -9,27 +9,43 @@ interface InstalledApp {
   category: string;
 }
 
-function AppIcon({ name }: { name: string }) {
+function AppIcon({ name, src }: { name: string; src?: string }) {
+  if (src) {
+    return (
+      <img
+        className="result-icon"
+        src={`data:image/png;base64,${src}`}
+        alt={name}
+        draggable={false}
+      />
+    );
+  }
   const letters = name
     .split(/\s+/)
     .slice(0, 2)
     .map((w) => w[0] ?? "")
     .join("")
     .toUpperCase();
-  return <span className="result-icon">{letters || "?"}</span>;
+  return <span className="result-icon result-icon--letter">{letters || "?"}</span>;
 }
 
 function App() {
   const [apps, setApps] = useState<InstalledApp[]>([]);
+  const [icons, setIcons] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    invoke<InstalledApp[]>("get_apps")
-      .then(setApps)
-      .finally(() => setLoading(false));
+    invoke<InstalledApp[]>("get_apps").then((result) => {
+      setApps(result);
+      setLoading(false);
+      if (result.length > 0) {
+        const paths = result.map((a) => a.path);
+        invoke<Record<string, string>>("get_icons", { paths }).then(setIcons);
+      }
+    });
   }, []);
 
   const results = query.trim()
@@ -74,8 +90,6 @@ function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [results, selectedIndex]);
 
-  const showEmpty = !loading && results.length === 0;
-
   return (
     <div className="launcher">
       <div className="search-bar">
@@ -85,7 +99,13 @@ function App() {
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
         >
-          <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" strokeWidth="1.6" />
+          <circle
+            cx="8.5"
+            cy="8.5"
+            r="5.5"
+            stroke="currentColor"
+            strokeWidth="1.6"
+          />
           <path
             d="M13 13l3.5 3.5"
             stroke="currentColor"
@@ -107,7 +127,7 @@ function App() {
       <div className="results" ref={listRef}>
         {loading && <div className="empty-state">Loading…</div>}
 
-        {showEmpty && (
+        {!loading && results.length === 0 && (
           <div className="empty-state">No results for "{query}"</div>
         )}
 
@@ -122,7 +142,7 @@ function App() {
                 onMouseEnter={() => setSelectedIndex(i)}
                 onClick={() => handleSelect(app)}
               >
-                <AppIcon name={app.name} />
+                <AppIcon name={app.name} src={icons[app.path]} />
                 <div className="result-text">
                   <span className="result-name">{app.name}</span>
                   {app.category && (
