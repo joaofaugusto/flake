@@ -1,6 +1,27 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tauri::Manager;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager,
+};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+fn toggle_window(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        if win.is_visible().unwrap_or(false) {
+            let _ = win.hide();
+        } else {
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    }
+}
 
 #[derive(serde::Serialize)]
 pub struct InstalledApp {
@@ -127,10 +148,11 @@ fn launch_app(app: tauri::AppHandle, path: String) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.hide();
     }
-    std::process::Command::new("explorer.exe")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new("explorer.exe");
+    cmd.arg(&path);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -165,13 +187,14 @@ foreach ($path in $paths) {
 $result | ConvertTo-Json -Compress
 "#;
 
-    let Ok(mut child) = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", script])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let Ok(mut child) = cmd.spawn() else {
         return HashMap::new();
     };
 
@@ -190,6 +213,46 @@ $result | ConvertTo-Json -Compress
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .setup(|app| {
+            // Tray icon
+            let show = MenuItem::with_id(app, "show", "Mostrar Flake", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &quit])?;
+
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .tooltip("Flake — Alt+Space")
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => toggle_window(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        toggle_window(&tray.app_handle().clone());
+                    }
+                })
+                .build(app)?;
+
+            // Global shortcut: Alt+Space toggles the launcher
+            app.handle().global_shortcut().on_shortcut(
+                "Alt+Space",
+                move |app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        toggle_window(app);
+                    }
+                },
+            )?;
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![get_apps, launch_app, get_icons])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
