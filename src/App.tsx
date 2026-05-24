@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import "./App.css";
 
 interface InstalledApp {
@@ -51,14 +51,23 @@ function App() {
   }, []);
 
   // Only show results when the user has typed something
-  const results =
-    query.trim().length > 0
-      ? apps.filter(
-          (app) =>
-            app.name.toLowerCase().includes(query.toLowerCase()) ||
-            app.category.toLowerCase().includes(query.toLowerCase()),
-        )
-      : [];
+  const hasQuery = query.trim().length > 0;
+  const results = hasQuery
+    ? apps.filter(
+        (app) =>
+          app.name.toLowerCase().includes(query.toLowerCase()) ||
+          app.category.toLowerCase().includes(query.toLowerCase()),
+      )
+    : [];
+
+  // Dynamically resize the window to match content height
+  useEffect(() => {
+    const launcher = document.querySelector<HTMLElement>(".launcher");
+    if (launcher) {
+      const height = launcher.clientHeight;
+      getCurrentWindow().setSize(new LogicalSize(680, height));
+    }
+  }, [results, query, loading]);
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -72,7 +81,6 @@ function App() {
   }, [selectedIndex]);
 
   const handleSelect = async (app: InstalledApp) => {
-    // Track the launch for future ranking
     invoke("track_launch", { path: app.path });
     await invoke("launch_app", { path: app.path });
   };
@@ -123,17 +131,17 @@ function App() {
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Flake Search"
+          placeholder="Spotlight Search"
           spellCheck={false}
         />
       </div>
 
-      <div className="divider" />
+      {hasQuery && <div className="divider" />}
 
       <div className="results" ref={listRef}>
-        {loading && <div className="empty-state">Searching Mac...</div>}
+        {loading && hasQuery && <div className="empty-state">Searching...</div>}
 
-        {!loading && query.trim().length > 0 && results.length === 0 && (
+        {!loading && hasQuery && results.length === 0 && (
           <div className="empty-state">No results found for "{query}"</div>
         )}
 
